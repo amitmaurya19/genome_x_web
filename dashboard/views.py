@@ -1,11 +1,10 @@
 import plotly.express as px
-import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 import numpy as np
-import joblib
 import os
 
+import xgboost as xgb 
 from django.shortcuts import render
 from django.http import HttpResponse
 from django.core.files.storage import FileSystemStorage
@@ -14,14 +13,11 @@ from django.conf import settings
 from Bio import SeqIO
 
 # ============================================================
-# PATH & STORAGE CONFIG (PRODUCTION SAFE)
+# PATH CONFIG
 # ============================================================
 
 BASE_DIR = settings.BASE_DIR
 MODEL_PATH = os.path.join(BASE_DIR, "genome_x_xgboost.model")
-
-# Ensure media directory exists (IMPORTANT for Render)
-os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
 # ============================================================
 # BIOLOGY HELPERS
@@ -62,13 +58,11 @@ def generate_interactive_charts(df):
         title="AI Confidence Distribution",
         template="plotly_dark"
     )
-
     fig_dist.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color="white"
     )
-
     charts["score_dist"] = pio.to_html(fig_dist, full_html=False)
 
     fig_scatter = px.scatter(
@@ -80,26 +74,18 @@ def generate_interactive_charts(df):
         title="GC Content vs Efficiency",
         template="plotly_dark"
     )
-
     fig_scatter.add_vline(x=40, line_dash="dash", line_color="red")
     fig_scatter.add_vline(x=60, line_dash="dash", line_color="red")
-
     fig_scatter.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color="white"
     )
-
     charts["gc_scatter"] = pio.to_html(fig_scatter, full_html=False)
 
     counts = pd.DataFrame({
         "Base": ["A", "T", "G", "C"],
-        "Count": [
-            "".join(df["seq"]).count("A"),
-            "".join(df["seq"]).count("T"),
-            "".join(df["seq"]).count("G"),
-            "".join(df["seq"]).count("C"),
-        ]
+        "Count": [ "".join(df["seq"]).count(b) for b in "ATGC" ]
     })
 
     fig_pie = px.pie(
@@ -109,13 +95,11 @@ def generate_interactive_charts(df):
         title="Nucleotide Composition",
         template="plotly_dark"
     )
-
     fig_pie.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color="white"
     )
-
     charts["composition"] = pio.to_html(fig_pie, full_html=False)
 
     return charts
@@ -127,14 +111,14 @@ def generate_interactive_charts(df):
 def home(request):
     if request.method == "POST" and request.FILES.get("fasta_file"):
         try:
-            uploaded_file = request.FILES["fasta_file"]
+            # Ensure media directory exists
+            os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
-            # Save file safely
+            uploaded_file = request.FILES["fasta_file"]
             fs = FileSystemStorage(location=settings.MEDIA_ROOT)
             filename = fs.save(uploaded_file.name, uploaded_file)
             file_path = fs.path(filename)
 
-            # Parse FASTA
             records = list(SeqIO.parse(file_path, "fasta"))
             candidates = []
 
@@ -160,14 +144,22 @@ def home(request):
                     "error": "ML model file missing on server."
                 })
 
-            model = joblib.load(MODEL_PATH)
+            # ====================================================
+            # ✅ FIXED MODEL LOADING & PREDICTION (CRITICAL)
+            # ====================================================
 
             df = pd.DataFrame(candidates)
-            X = encode_sequence(df["seq"])
-            df["Predicted_Efficiency"] = model.predict(X)
-            df["GC_Content"] = df["seq"].apply(calculate_gc)
+            X_input = encode_sequence(df["seq"])
 
+            booster = xgb.Booster()
+            booster.load_model(MODEL_PATH)
+
+            dmat = xgb.DMatrix(X_input)
+            df["Predicted_Efficiency"] = booster.predict(dmat)
+
+            df["GC_Content"] = df["seq"].apply(calculate_gc)
             df = df.sort_values("Predicted_Efficiency", ascending=False)
+
             request.session["results_csv"] = df.to_csv(index=False)
 
             display_df = df.copy()
