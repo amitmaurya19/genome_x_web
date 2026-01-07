@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Genome-X Pro Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        body { background-color: #0b0c10; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; padding-bottom: 50px; }
+        
+        /* Navbar */
+        .navbar { background: #1f2833; border-bottom: 2px solid #45a29e; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .brand { color: #66fcf1; font-weight: bold; font-size: 1.5em; letter-spacing: 1px; }
+        
+        /* Cards & Metrics */
+        .card-sci { background: #1f2833; border: 1px solid #2c3e50; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.2s; }
+        .card-sci:hover { transform: translateY(-5px); border-color: #45a29e; }
+        .metric-val { font-size: 3em; font-weight: 800; color: #66fcf1; text-shadow: 0 0 10px rgba(102, 252, 241, 0.3); }
+        .metric-label { text-transform: uppercase; letter-spacing: 1px; color: #c5c6c7; font-size: 0.8em; }
+        
+        /* Tables */
+        .table-dark { background-color: #1f2833; --bs-table-bg: #1f2833; }
+        .score-high { color: #00f2c3; font-weight: bold; font-size: 1.1em; }
+        
+        /* Buttons */
+        .btn-download { border: 1px solid #66fcf1; color: #66fcf1; background: rgba(102, 252, 241, 0.1); border-radius: 50px; padding: 5px 20px; }
+        .btn-download:hover { background: #66fcf1; color: #0b0c10; }
+        
+        /* Floating Guide Button */
+        .btn-guide {
+            position: fixed; bottom: 30px; right: 30px;
+            width: 60px; height: 60px; border-radius: 50%;
+            background: #ff0055; color: white; border: none;
+            font-size: 24px; box-shadow: 0 0 20px rgba(255, 0, 85, 0.6);
+            z-index: 1000; transition: transform 0.3s;
+        }
+        .btn-guide:hover { transform: scale(1.1) rotate(10deg); background: #ff2e63; }
+
+        /* --- GUIDE BOOK STYLING (FIXED VISIBILITY) --- */
+        .offcanvas { background-color: #15161a; color: #ffffff; border-left: 1px solid #45a29e; }
+        .guide-section { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #2c3e50; }
+        .guide-title { color: #66fcf1; font-weight: bold; margin-bottom: 8px; font-size: 1.1em; border-left: 3px solid #ff0055; padding-left: 10px; }
+        
+        /* Override Bootstrap's text-muted to be visible on dark background */
+        .offcanvas .text-muted { color: #dcdcdc !important; font-size: 0.95em; line-height: 1.5; }
+        .term { color: #ff0055; font-weight: bold; }
+        .offcanvas-header { border-bottom: 1px solid #2c3e50; background: #1f2833; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark px-4">
+        <div class="container-fluid">
+            <span class="navbar-brand brand"><i class="fas fa-dna"></i> GENOME-X <span style="font-size:0.6em; color:#fff;">PRO</span></span>
+            <div class="d-flex align-items-center">
+                <a href="/" class="btn btn-sm btn-outline-secondary me-3"><i class="fas fa-redo"></i> New Scan</a>
+                <a href="{% url 'download_csv' %}" class="btn btn-sm btn-download"><i class="fas fa-download"></i> Download Full Report</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card card-sci p-4 text-center">
+                    <div class="metric-val">{{ total }}</div>
+                    <div class="metric-label">Total Potential Targets Scanned</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card card-sci p-4 text-center">
+                    <div class="metric-val text-success">{{ qualified }}</div>
+                    <div class="metric-label">Gold Standard Candidates (>80% Efficiency)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-2">
+            <div class="col-md-4">
+                <div class="card card-sci p-1">
+                    <div class="p-2 text-center text-muted small" style="color: #888 !important;">AI CONFIDENCE DISTRIBUTION</div>
+                    {{ charts.score_dist|safe }}
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-sci p-1">
+                    <div class="p-2 text-center text-muted small" style="color: #888 !important;">THERMODYNAMIC SAFETY ZONE</div>
+                    {{ charts.gc_scatter|safe }}
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-sci p-1">
+                    <div class="p-2 text-center text-muted small" style="color: #888 !important;">NUCLEOTIDE COMPOSITION</div>
+                    {{ charts.composition|safe }}
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-sci p-4 mt-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 style="color:#66fcf1"><i class="fas fa-trophy"></i> Top 20 Recommended Guide RNAs</h4>
+                <span class="badge bg-secondary">Sorted by AI Score</span>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped">
+                    <thead>
+                        <tr style="color: #45a29e;">
+                            <th>Rank</th>
+                            <th>Sequence (5' -> 3')</th>
+                            <th>PAM</th>
+                            <th>GC%</th>
+                            <th>AI Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cand in candidates %}
+                        <tr>
+                            <td>#{{ forloop.counter }}</td>
+                            <td style="font-family: monospace; letter-spacing: 1px; font-size: 1.1em;">{{ cand.seq }}</td>
+                            <td><span class="badge bg-danger">{{ cand.pam }}</span></td>
+                            <td>{{ cand.GC_Content }}%</td>
+                            <td class="score-high">{{ cand.Predicted_Efficiency }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <button class="btn-guide" type="button" data-bs-toggle="offcanvas" data-bs-target="#guideBook" aria-controls="guideBook">
+        <i class="fas fa-book-open"></i>
+    </button>
+
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="guideBook" aria-labelledby="guideBookLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="guideBookLabel"><i class="fas fa-microscope"></i> Scientist's Handbook</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            
+            <div class="guide-section">
+                <div class="guide-title">1. What is this Dashboard?</div>
+                <p class="text-muted">This is <strong>Genome-X</strong>, an AI-powered tool that helps geneticists choose the best "molecular scissors" for gene editing.</p>
+            </div>
+
+            <div class="guide-section">
+                <div class="guide-title">2. Biological Dictionary</div>
+                <ul class="list-unstyled text-muted">
+                    <li class="mb-3"><span class="term">CRISPR-Cas9:</span> A technology to change DNA. Think of it as "Copy-Paste" for genes.</li>
+                    <li class="mb-3"><span class="term">gRNA (Guide RNA):</span> The "GPS" that leads the scissors to the right spot.</li>
+                    <li class="mb-3"><span class="term">PAM (NGG):</span> The "Landing Light". The scissors won't cut unless they see this 3-letter code (usually GGG or AGG).</li>
+                    <li class="mb-3"><span class="term">GC Content:</span> The stickiness of the RNA. Too low (<40%) falls off. Too high (>60%) gets stuck in wrong places.</li>
+                </ul>
+            </div>
+
+            <div class="guide-section">
+                <div class="guide-title">3. The Process Flow</div>
+                <ol class="text-muted ps-3">
+                    <li class="mb-2"><strong>Upload:</strong> You submit raw DNA (FASTA file).</li>
+                    <li class="mb-2"><strong>Scan:</strong> The system finds every possible "Cut Site" (NGG).</li>
+                    <li class="mb-2"><strong>Feature Extraction:</strong> We calculate biological math (Weight, Melting Temp).</li>
+                    <li class="mb-2"><strong>AI Prediction:</strong> XGBoost predicts success probability (0-1).</li>
+                    <li class="mb-2"><strong>Filter:</strong> We remove risky or weak candidates.</li>
+                </ol>
+            </div>
+
+            <div class="guide-section">
+                <div class="guide-title">4. How to read the results?</div>
+                <p class="text-muted">Look for the <strong>AI Confidence</strong> score.
+                <br>• <strong>0.8 - 1.0:</strong> Excellent Candidate.
+                <br>• <strong>0.5 - 0.7:</strong> Risky / Experimental.
+                <br>• <strong>0.5:</strong> Do not use.</p>
+            </div>
+
+            <div class="alert alert-info small">
+                <i class="fas fa-info-circle"></i> <strong>Pro Tip:</strong> Use the "Download Report" button to get the CSV file for your lab experiments.
+            </div>
+
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
